@@ -1,0 +1,54 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: wify-app
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:10.252.0.9}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:pingpong_acquirer_common}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USERNAME:pp_dev}
+    password: ${MYSQL_PASSWORD:JyKlF4bIvI2a41sT}
+  data:
+    redis:
+      host: ${REDIS_HOST:dev-redis-cluster.pingpongx.com}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:PingPong1234}
+      database: ${REDIS_DATABASE:0}
+      timeout: 5s
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+    cache-enabled: false
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+wify:
+  http:
+    llm:
+      connect-timeout-ms: 5000
+      read-timeout-ms: 60000
+      stream-read-timeout-ms: 120000
+  resilience:
+    circuit-breaker:
+      sliding-window-size: 10
+      failure-rate-threshold: 50
+      wait-duration-in-open-state: 30s
+      permitted-number-of-calls-in-half-open-state: 3
+    retry:
+      timeout-retries: 2
+      timeout-wait-duration: 1s
+      rate-limit-retries: 2
+      rate-limit-initial-wait-duration: 2s
+      rate-limit-multiplier: 2.0
+  mybatis-plus:
+    logic-delete-field: deleted
+    logic-delete-value: 1
+    logic-not-delete-value: 0

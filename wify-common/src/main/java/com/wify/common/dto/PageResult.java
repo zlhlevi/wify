@@ -7,21 +7,21 @@ public class PageResult<T> extends Result<List<T>> {
 
     private long total;
     private long page;
-    private long size;
+    private long pageSize;
 
     public PageResult() {
         setData(Collections.emptyList());
     }
 
-    public PageResult(int code, String message, List<T> data, long total, long page, long size) {
+    public PageResult(int code, String message, List<T> data, long total, long page, long pageSize) {
         super(code, message, data == null ? Collections.emptyList() : data);
         this.total = total;
         this.page = page;
-        this.size = size;
+        this.pageSize = pageSize;
     }
 
-    public static <T> PageResult<T> ok(List<T> data, long total, long page, long size) {
-        return new PageResult<>(200, "success", data, total, page, size);
+    public static <T> PageResult<T> ok(List<T> data, long total, long page, long pageSize) {
+        return new PageResult<>(200, "success", data, total, page, pageSize);
     }
 
     @Override
@@ -45,11 +45,11 @@ public class PageResult<T> extends Result<List<T>> {
         this.page = page;
     }
 
-    public long getSize() {
-        return size;
+    public long getPageSize() {
+        return pageSize;
     }
 
-    public void setSize(long size) {
-        this.size = size;
+    public void setPageSize(long pageSize) {
+        this.pageSize = pageSize;
     }
 }

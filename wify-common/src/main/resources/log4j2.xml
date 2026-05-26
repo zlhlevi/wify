@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Properties>
+        <Property name="logEnv">${sys:wify.log.env:-${env:SPRING_PROFILES_ACTIVE:-dev}}</Property>
+        <Property name="logPath">${sys:LOG_PATH:-logs}</Property>
+        <Property name="logPattern">%d{HH:mm:ss} [%thread] [%X{traceId}] %-5level %logger{20} - %msg%n</Property>
+    </Properties>
+
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout
+                    pattern="%d{HH:mm:ss} [%thread] [%X{traceId}] %highlight{%-5level}{FATAL=red bold, ERROR=red bold, WARN=yellow bold, INFO=green, DEBUG=cyan, TRACE=blue} %logger{20} - %msg%n"/>
+        </Console>
+
+        <RollingFile
+                name="JsonFile"
+                fileName="${logPath}/wify.log"
+                filePattern="${logPath}/archive/wify-%d{yyyy-MM-dd}.log.gz">
+            <JsonLayout complete="false" compact="true" eventEol="true" properties="true"
+                        stacktraceAsString="true"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+            </Policies>
+            <DefaultRolloverStrategy>
+                <Delete basePath="${logPath}/archive" maxDepth="1">
+                    <IfFileName glob="wify-*.log.gz"/>
+                    <IfLastModified age="30d"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
+
+        <Routing name="EnvironmentRouting">
+            <Routes pattern="${logEnv}">
+                <Route key="prod" ref="JsonFile"/>
+                <Route key="production" ref="JsonFile"/>
+                <Route ref="Console"/>
+            </Routes>
+        </Routing>
+    </Appenders>
+
+    <Loggers>
+        <Root level="INFO">
+            <AppenderRef ref="EnvironmentRouting"/>
+        </Root>
+    </Loggers>
+</Configuration>
