@@ -1,6 +1,6 @@
 import axios, { type AxiosRequestConfig } from 'axios'
-import { ElMessage } from 'element-plus'
 import type { Result } from '@/types/app'
+import { notifyError } from '@/utils/notify'
 
 const request = axios.create({
   baseURL: '/api',
@@ -18,7 +18,7 @@ request.interceptors.response.use(
       return result.data as never
     }
 
-    ElMessage.error(result.message || 'Request failed')
+    notifyError(result.message || 'Request failed')
     return Promise.reject(new Error(result.message || 'Request failed'))
   },
   (error) => {
@@ -27,7 +27,7 @@ request.interceptors.response.use(
       error.message ||
       'Request failed'
 
-    ElMessage.error(message)
+    notifyError(message)
     return Promise.reject(error)
   },
 )
