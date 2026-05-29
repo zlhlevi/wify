@@ -215,6 +215,8 @@ POST   /api/v1/providers/{id}/test-connection  # 非 CRUD 操作用动词
 - 配置项外化到 application.yml，不硬编码
 - 异常处理必须使用 ErrorCode 枚举，禁止硬编码错误码和错误信息
 - 日志使用lombok组件
+- getter/setter方法使用lombok组件
+- 类中的成员变量、方法要写javadoc注释
 
 ### 改代码时
 - 先理解相关模块的设计意图

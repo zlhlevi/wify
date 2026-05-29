@@ -35,7 +35,7 @@
         <pgvector.version>0.1.6</pgvector.version>
         <resilience4j.version>2.2.0</resilience4j.version>
         <lombok.version>1.18.34</lombok.version>
-        <okhttp.version>4.12.0</okhttp.version>
+        <okhttp.version>4.11.0</okhttp.version>
         <maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
     </properties>
 

@@ -1,5 +1,6 @@
 package com.wify.common.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
@@ -27,10 +28,11 @@ public class RedisConfig {
 
     @Bean
     @ConditionalOnMissingBean
-    public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory redisConnectionFactory) {
+    public RedisTemplate<String, Object> redisTemplate(
+            RedisConnectionFactory redisConnectionFactory, ObjectMapper objectMapper) {
         RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
         StringRedisSerializer stringRedisSerializer = new StringRedisSerializer();
-        GenericJackson2JsonRedisSerializer jsonRedisSerializer = new GenericJackson2JsonRedisSerializer();
+        GenericJackson2JsonRedisSerializer jsonRedisSerializer = createJsonRedisSerializer(objectMapper);
 
         redisTemplate.setConnectionFactory(redisConnectionFactory);
         redisTemplate.setKeySerializer(stringRedisSerializer);
@@ -43,27 +45,37 @@ public class RedisConfig {
 
     @Bean
     @ConditionalOnMissingBean
-    public RedisCacheManager redisCacheManager(RedisConnectionFactory redisConnectionFactory) {
-        RedisCacheConfiguration defaultCacheConfiguration = buildCacheConfiguration(DEFAULT_TTL);
+    public RedisCacheManager redisCacheManager(
+            RedisConnectionFactory redisConnectionFactory, ObjectMapper objectMapper) {
+        RedisCacheConfiguration defaultCacheConfiguration = buildCacheConfiguration(DEFAULT_TTL, objectMapper);
 
         Map<String, RedisCacheConfiguration> cacheConfigurations = new HashMap<>();
-        cacheConfigurations.put("provider-cache", buildCacheConfiguration(DEFAULT_TTL));
-        cacheConfigurations.put("agent-cache", buildCacheConfiguration(DEFAULT_TTL));
-        cacheConfigurations.put("session-cache", buildCacheConfiguration(SESSION_TTL));
+        cacheConfigurations.put("provider-cache", buildCacheConfiguration(DEFAULT_TTL, objectMapper));
+        cacheConfigurations.put("agent-cache", buildCacheConfiguration(DEFAULT_TTL, objectMapper));
+        cacheConfigurations.put("session-cache", buildCacheConfiguration(SESSION_TTL, objectMapper));
 
         return RedisCacheManager.builder(redisConnectionFactory)
                 .cacheDefaults(defaultCacheConfiguration)
                 .withInitialCacheConfigurations(cacheConfigurations)
+                .transactionAware()
                 .build();
     }
 
-    private RedisCacheConfiguration buildCacheConfiguration(Duration ttl) {
+    private RedisCacheConfiguration buildCacheConfiguration(Duration ttl, ObjectMapper objectMapper) {
         return RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(ttl)
                 .computePrefixWith(cacheName -> CACHE_KEY_PREFIX + cacheName + ":")
                 .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(
                         new StringRedisSerializer()))
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(
-                        new GenericJackson2JsonRedisSerializer()));
+                        createJsonRedisSerializer(objectMapper)));
+    }
+
+    private GenericJackson2JsonRedisSerializer createJsonRedisSerializer(ObjectMapper objectMapper) {
+        return GenericJackson2JsonRedisSerializer.builder()
+                .objectMapper(objectMapper.copy())
+                .defaultTyping(true)
+                .registerNullValueSerializer(true)
+                .build();
     }
 }

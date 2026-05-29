@@ -11,8 +11,12 @@ spring:
     password: ${MYSQL_PASSWORD:JyKlF4bIvI2a41sT}
   data:
     redis:
-      host: ${REDIS_HOST:dev-redis-cluster.pingpongx.com}
-      port: ${REDIS_PORT:6379}
+    #  host: ${REDIS_HOST:dev-redis-cluster.pingpongx.com}
+    #  port: ${REDIS_PORT:6379}
+      cluster:
+        nodes:
+          - ${REDIS_HOST:dev-redis-cluster.pingpongx.com}:${REDIS_PORT:6379}
+        max-redirects: 5
       password: ${REDIS_PASSWORD:PingPong1234}
       database: ${REDIS_DATABASE:0}
       timeout: 5s

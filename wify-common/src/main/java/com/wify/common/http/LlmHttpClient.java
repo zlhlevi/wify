@@ -1,211 +1,157 @@
 package com.wify.common.http;
 
 import com.wify.common.exception.LlmApiException;
+import lombok.extern.slf4j.Slf4j;
+import okhttp3.*;
+import org.springframework.stereotype.Component;
+
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InterruptedIOException;
 import java.io.InputStreamReader;
 import java.net.SocketTimeoutException;
-import java.nio.charset.StandardCharsets;
-import java.util.Collections;
 import java.util.Map;
-import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import lombok.extern.slf4j.Slf4j;
-import okhttp3.Headers;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatusCode;
-import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpStatusCodeException;
-import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
 @Slf4j
 @Component
 public class LlmHttpClient {
 
-    private static final MediaType DEFAULT_OKHTTP_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
-    private static final org.springframework.http.MediaType DEFAULT_SPRING_MEDIA_TYPE =
-            org.springframework.http.MediaType.APPLICATION_JSON;
+    private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
 
-    private final RestTemplate restTemplate;
-    private final OkHttpClient okHttpClient;
+    private final OkHttpClient httpClient;
+    private final OkHttpClient streamClient;
 
-    public LlmHttpClient(
-            @Value("${wify.http.llm.connect-timeout-ms:5000}") int connectTimeoutMs,
-            @Value("${wify.http.llm.read-timeout-ms:60000}") int readTimeoutMs,
-            @Value("${wify.http.llm.stream-read-timeout-ms:120000}") int streamReadTimeoutMs) {
-        this.restTemplate = createRestTemplate(connectTimeoutMs, readTimeoutMs);
-        this.okHttpClient = createOkHttpClient(connectTimeoutMs, streamReadTimeoutMs);
+    public LlmHttpClient() {
+        this.httpClient = new OkHttpClient.Builder()
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(120, TimeUnit.SECONDS)
+                .build();
+
+        // 流式读取需要更长的 read timeout，设为 0 表示不超时（由业务层控制）
+        this.streamClient = httpClient.newBuilder()
+                .readTimeout(0, TimeUnit.SECONDS)
+                .build();
     }
 
+    /**
+     * 同步 POST，返回响应体字符串。
+     * 连接超时 5s，读超时 120s。
+     */
     public String post(String url, Map<String, String> headers, String body) {
-        long startNanos = System.nanoTime();
-        HttpHeaders httpHeaders = buildHttpHeaders(headers);
-        HttpEntity<String> requestEntity = new HttpEntity<>(defaultBody(body), httpHeaders);
+        Request request = buildRequest(url, headers, body);
+        long start = System.currentTimeMillis();
 
-        try {
-            ResponseEntity<String> response =
-                    restTemplate.exchange(url, HttpMethod.POST, requestEntity, String.class);
-            log.info("LLM POST success url={}, durationMs={}, statusCode={}",
-                    url, elapsedMillis(startNanos), response.getStatusCode().value());
-            return response.getBody();
-        } catch (HttpStatusCodeException exception) {
-            log.warn("LLM POST failed url={}, durationMs={}, statusCode={}",
-                    url, elapsedMillis(startNanos), exception.getStatusCode().value());
-            throw mapStatusException("LLM POST request failed", exception.getStatusCode(), exception);
-        } catch (ResourceAccessException exception) {
-            log.warn("LLM POST failed url={}, durationMs={}, statusCode=N/A",
-                    url, elapsedMillis(startNanos));
-            throw mapClientException("LLM POST request failed", exception);
-        } catch (RestClientException exception) {
-            log.error("LLM POST failed url={}, durationMs={}, statusCode=N/A",
-                    url, elapsedMillis(startNanos), exception);
-            throw new LlmApiException(
-                    LlmApiException.Type.REQUEST_FAILED, "LLM POST request failed", exception);
+        try (Response response = httpClient.newCall(request).execute()) {
+            long elapsed = System.currentTimeMillis() - start;
+            log.info("LLM POST {} status={} cost={}ms", url, response.code(), elapsed);
+
+            checkStatus(response.code(), url);
+
+            ResponseBody responseBody = response.body();
+            return responseBody != null ? responseBody.string() : "";
+        } catch (SocketTimeoutException e) {
+            log.warn("LLM POST {} timeout after {}ms", url, System.currentTimeMillis() - start);
+            throw new LlmApiException(LlmApiException.Type.TIMEOUT, "LLM 请求超时：" + url, e);
+        } catch (LlmApiException e) {
+            throw e;
+        } catch (IOException e) {
+            log.error("LLM POST {} error: {}", url, e.getMessage());
+            throw new LlmApiException(LlmApiException.Type.UNKNOWN, "LLM 请求异常：" + e.getMessage(), e);
         }
     }
 
+    /**
+     * 流式 POST，按行回调。
+     * 每收到一行非空内容调用 callback，结束后调用 callback(null) 表示流结束。
+     */
     public void stream(String url, Map<String, String> headers, String body, Consumer<String> callback) {
-        Objects.requireNonNull(callback, "callback must not be null");
-        long startNanos = System.nanoTime();
+        Request request = buildRequest(url, headers, body);
+        long start = System.currentTimeMillis();
 
-        Request request = new Request.Builder()
-                .url(url)
-                .headers(buildOkHttpHeaders(headers))
-                .post(RequestBody.create(resolveMediaType(headers), defaultBody(body)))
-                .build();
+        try (Response response = streamClient.newCall(request).execute()) {
+            log.info("LLM STREAM {} status={}", url, response.code());
 
-        try (Response response = okHttpClient.newCall(request).execute()) {
-            int statusCode = response.code();
-            if (!response.isSuccessful()) {
-                log.warn("LLM STREAM failed url={}, durationMs={}, statusCode={}",
-                        url, elapsedMillis(startNanos), statusCode);
-                throw mapStatusCode("LLM stream request failed", statusCode, null);
-            }
+            checkStatus(response.code(), url);
 
             ResponseBody responseBody = response.body();
             if (responseBody == null) {
-                log.info("LLM STREAM completed url={}, durationMs={}, statusCode={}",
-                        url, elapsedMillis(startNanos), statusCode);
+                callback.accept(null);
                 return;
             }
 
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(responseBody.byteStream(), StandardCharsets.UTF_8))) {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(responseBody.byteStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    callback.accept(line);
+                    if (!line.isBlank()) {
+                        callback.accept(line);
+                    }
                 }
             }
+            long elapsed = System.currentTimeMillis() - start;
+            log.info("LLM STREAM {} completed cost={}ms", url, elapsed);
+            callback.accept(null);
 
-            log.info("LLM STREAM completed url={}, durationMs={}, statusCode={}",
-                    url, elapsedMillis(startNanos), statusCode);
-        } catch (IOException exception) {
-            log.warn("LLM STREAM failed url={}, durationMs={}, statusCode=N/A",
-                    url, elapsedMillis(startNanos));
-            throw mapClientException("LLM stream request failed", exception);
+        } catch (SocketTimeoutException e) {
+            log.warn("LLM STREAM {} timeout", url);
+            throw new LlmApiException(LlmApiException.Type.TIMEOUT, "LLM 流式请求超时：" + url, e);
+        } catch (LlmApiException e) {
+            throw e;
+        } catch (IOException e) {
+            log.error("LLM STREAM {} error: {}", url, e.getMessage());
+            throw new LlmApiException(LlmApiException.Type.UNKNOWN, "LLM 流式请求异常：" + e.getMessage(), e);
         }
     }
 
-    private RestTemplate createRestTemplate(int connectTimeoutMs, int readTimeoutMs) {
-        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(connectTimeoutMs);
-        requestFactory.setReadTimeout(readTimeoutMs);
-        return new RestTemplate(requestFactory);
-    }
-
-    private OkHttpClient createOkHttpClient(int connectTimeoutMs, int readTimeoutMs) {
-        return new OkHttpClient.Builder()
-                .connectTimeout(java.time.Duration.ofMillis(connectTimeoutMs))
-                .readTimeout(java.time.Duration.ofMillis(readTimeoutMs))
-                .build();
-    }
-
-    private HttpHeaders buildHttpHeaders(Map<String, String> headers) {
-        HttpHeaders httpHeaders = new HttpHeaders();
-        safeHeaders(headers).forEach(httpHeaders::set);
-        if (!httpHeaders.containsKey(HttpHeaders.CONTENT_TYPE)) {
-            httpHeaders.setContentType(DEFAULT_SPRING_MEDIA_TYPE);
+    /**
+     * 同步 GET，返回响应体字符串。
+     * 可传入自定义 OkHttpClient（用于连通性测试的 10s 超时客户端）。
+     */
+    public String get(String url, Map<String, String> headers, OkHttpClient client) {
+        Request.Builder builder = new Request.Builder().url(url).get();
+        if (headers != null) {
+            headers.forEach(builder::header);
         }
-        return httpHeaders;
+        long start = System.currentTimeMillis();
+        try (Response response = client.newCall(builder.build()).execute()) {
+            long elapsed = System.currentTimeMillis() - start;
+            log.info("LLM GET {} status={} cost={}ms", url, response.code(), elapsed);
+            checkStatus(response.code(), url);
+            ResponseBody responseBody = response.body();
+            return responseBody != null ? responseBody.string() : "";
+        } catch (SocketTimeoutException e) {
+            log.warn("LLM GET {} timeout after {}ms", url, System.currentTimeMillis() - start);
+            throw new LlmApiException(LlmApiException.Type.TIMEOUT, "请求超时：" + url, e);
+        } catch (LlmApiException e) {
+            throw e;
+        } catch (IOException e) {
+            log.error("LLM GET {} error: {}", url, e.getMessage());
+            throw new LlmApiException(LlmApiException.Type.UNKNOWN, "请求异常：" + e.getMessage(), e);
+        }
     }
 
-    private Headers buildOkHttpHeaders(Map<String, String> headers) {
-        Headers.Builder builder = new Headers.Builder();
-        safeHeaders(headers).forEach(builder::add);
-        if (builder.get(HttpHeaders.CONTENT_TYPE) == null) {
-            builder.add(HttpHeaders.CONTENT_TYPE, DEFAULT_OKHTTP_MEDIA_TYPE.toString());
+    // ── 私有工具方法 ──────────────────────────────────────────
+
+    private Request buildRequest(String url, Map<String, String> headers, String body) {
+        Request.Builder builder = new Request.Builder()
+                .url(url)
+                .post(RequestBody.create(body, JSON));
+        if (headers != null) {
+            headers.forEach(builder::header);
         }
         return builder.build();
     }
 
-    private MediaType resolveMediaType(Map<String, String> headers) {
-        String contentType = safeHeaders(headers).get(HttpHeaders.CONTENT_TYPE);
-        if (contentType == null || contentType.isBlank()) {
-            return DEFAULT_OKHTTP_MEDIA_TYPE;
+    private void checkStatus(int code, String url) {
+        if (code == 200) return;
+        if (code == 401 || code == 403) {
+            log.warn("LLM {} auth failed status={}", url, code);
+            throw new LlmApiException(LlmApiException.Type.AUTH_FAILED, code, "API Key 无效或无权限");
         }
-        MediaType mediaType = MediaType.parse(contentType);
-        return mediaType == null ? DEFAULT_OKHTTP_MEDIA_TYPE : mediaType;
-    }
-
-    private Map<String, String> safeHeaders(Map<String, String> headers) {
-        return headers == null ? Collections.emptyMap() : headers;
-    }
-
-    private String defaultBody(String body) {
-        return body == null ? "" : body;
-    }
-
-    private long elapsedMillis(long startNanos) {
-        return (System.nanoTime() - startNanos) / 1_000_000L;
-    }
-
-    private LlmApiException mapStatusException(
-            String message, HttpStatusCode statusCode, Exception exception) {
-        return mapStatusCode(message, statusCode.value(), exception);
-    }
-
-    private LlmApiException mapStatusCode(String message, int statusCode, Exception exception) {
-        if (statusCode == 401 || statusCode == 403) {
-            return new LlmApiException(LlmApiException.Type.AUTH_FAILED, message, statusCode, exception);
+        if (code == 429) {
+            log.warn("LLM {} rate limited", url);
+            throw new LlmApiException(LlmApiException.Type.RATE_LIMITED, code, "请求速率超限，请稍后重试");
         }
-        if (statusCode == 429) {
-            return new LlmApiException(LlmApiException.Type.RATE_LIMITED, message, statusCode, exception);
-        }
-        if (statusCode == 408) {
-            return new LlmApiException(LlmApiException.Type.TIMEOUT, message, statusCode, exception);
-        }
-        return new LlmApiException(LlmApiException.Type.REQUEST_FAILED, message, statusCode, exception);
-    }
-
-    private LlmApiException mapClientException(String message, Exception exception) {
-        if (isTimeoutException(exception)) {
-            return new LlmApiException(LlmApiException.Type.TIMEOUT, message, exception);
-        }
-        return new LlmApiException(LlmApiException.Type.REQUEST_FAILED, message, exception);
-    }
-
-    private boolean isTimeoutException(Throwable throwable) {
-        Throwable current = throwable;
-        while (current != null) {
-            if (current instanceof SocketTimeoutException || current instanceof InterruptedIOException) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
+        throw new LlmApiException(LlmApiException.Type.UNKNOWN, code, "LLM 请求失败，status=" + code);
     }
 }

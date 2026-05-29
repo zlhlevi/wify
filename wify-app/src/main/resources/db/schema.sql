@@ -1,40 +1,47 @@
 CREATE TABLE IF NOT EXISTS provider (
     id bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-    name varchar(100) NOT NULL DEFAULT '' COMMENT '提供商名称',
-    provider_type varchar(50) NOT NULL DEFAULT '' COMMENT '提供商类型，例如 openai/claude/gemini/ollama',
-    base_url varchar(255) NOT NULL DEFAULT '' COMMENT '接口基础地址',
-    api_key varchar(512) NOT NULL DEFAULT '' COMMENT '接口密钥',
-    organization_id varchar(128) NOT NULL DEFAULT '' COMMENT '组织ID',
-    status tinyint NOT NULL DEFAULT 1 COMMENT '状态：0禁用 1启用',
-    config_json json DEFAULT NULL COMMENT '扩展配置',
-    remark varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
+    name varchar(100) NOT NULL DEFAULT '' COMMENT '供应商名称，唯一',
+    type varchar(30) NOT NULL DEFAULT '' COMMENT '供应商类型：OPENAI/ANTHROPIC/OLLAMA/OPENAI_COMPATIBLE',
+    base_url varchar(500) NOT NULL DEFAULT '' COMMENT 'API基础地址',
+    auth_config json DEFAULT NULL COMMENT '鉴权配置，结构按type不同',
+    enabled tinyint NOT NULL DEFAULT 1 COMMENT '状态：0禁用 1启用',
     created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0正常 1删除',
     PRIMARY KEY (id),
     UNIQUE KEY uk_provider_name (name),
-    KEY idx_provider_provider_type (provider_type),
-    KEY idx_provider_status (status)
+    KEY idx_provider_type (type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='模型提供商';
 
 CREATE TABLE IF NOT EXISTS model_config (
     id bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
     provider_id bigint NOT NULL COMMENT '提供商ID',
-    name varchar(100) NOT NULL DEFAULT '' COMMENT '模型配置名称',
-    model_name varchar(100) NOT NULL DEFAULT '' COMMENT '模型名称',
-    model_type varchar(50) NOT NULL DEFAULT '' COMMENT '模型类型，例如 chat/embedding/rerank',
-    parameter_json json DEFAULT NULL COMMENT '模型参数配置',
-    status tinyint NOT NULL DEFAULT 1 COMMENT '状态：0禁用 1启用',
-    remark varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
+    name varchar(100) NOT NULL DEFAULT '' COMMENT '展示名，如GPT-4o',
+    model_id varchar(100) NOT NULL DEFAULT '' COMMENT '调用时传给API的值',
+    context_size int DEFAULT NULL COMMENT '上下文窗口大小（token数）',
+    extra_params json DEFAULT NULL COMMENT '模型级别扩展参数',
+    enabled tinyint NOT NULL DEFAULT 1 COMMENT '状态：0禁用 1启用',
     created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0正常 1删除',
     PRIMARY KEY (id),
     UNIQUE KEY uk_model_config_provider_id_name (provider_id, name),
-    KEY idx_model_config_provider_id (provider_id),
-    KEY idx_model_config_model_type (model_type),
-    KEY idx_model_config_status (status)
+    KEY idx_model_config_model_id (model_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='模型配置';
+
+CREATE TABLE IF NOT EXISTS provider_health (
+    id bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    provider_id bigint NOT NULL COMMENT '供应商ID，唯一索引',
+    status varchar(20) NOT NULL DEFAULT 'UNKNOWN' COMMENT '健康状态：UP/DOWN/DEGRADED/UNKNOWN',
+    last_check_at datetime DEFAULT NULL COMMENT '最后探测时间',
+    last_success_at datetime DEFAULT NULL COMMENT '最后成功时间',
+    fail_count int NOT NULL DEFAULT 0 COMMENT '连续失败次数',
+    latency_ms int DEFAULT NULL COMMENT '最近一次延迟，单位毫秒',
+    error_message varchar(500) NOT NULL DEFAULT '' COMMENT '最近失败原因',
+    updated_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_provider_health_provider_id (provider_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='供应商健康状态';
 
 CREATE TABLE IF NOT EXISTS mcp_server (
     id bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
