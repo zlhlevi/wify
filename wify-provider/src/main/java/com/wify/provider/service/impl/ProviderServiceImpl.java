@@ -21,6 +21,7 @@ import com.wify.provider.mapper.ProviderHealthMapper;
 import com.wify.provider.mapper.ProviderMapper;
 import com.wify.provider.service.ProviderService;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -64,7 +65,7 @@ public class ProviderServiceImpl implements ProviderService {
     }
 
     @Override
-    @Cacheable(cacheNames = "provider-cache", key = "'detail:' + #id")
+    @Cacheable(cacheNames = "provider-cache", key = "'detail:v2:' + #p0")
     public ProviderDetailResp getById(Long id) {
         Provider provider = getEntity(id);
         ProviderDetailResp resp = toDetailResp(provider);
@@ -76,17 +77,22 @@ public class ProviderServiceImpl implements ProviderService {
     @Override
     @Cacheable(
             cacheNames = "provider-cache",
-            key = "'list:' + (#page == null ? 1 : #page) + ':' + (#pageSize == null ? 20 : #pageSize)"
-                    + " + ':' + (#type == null ? '' : #type) + ':' + (#enabled == null ? 'ALL' : #enabled)")
+            key = "'list:v3:' + (#p0 == null ? 1 : #p0) + ':' + (#p1 == null ? 20 : #p1)"
+                    + " + ':' + (#p2 == null ? '' : #p2) + ':' + (#p3 == null ? 'ALL' : #p3)")
     public PageResult<ProviderResp> list(Integer page, Integer pageSize, String type, Integer enabled) {
         LambdaQueryWrapper<Provider> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(StringUtils.hasText(type), Provider::getType, type == null ? null : type.trim());
         queryWrapper.eq(enabled != null, Provider::getEnabled, enabled);
         queryWrapper.orderByDesc(Provider::getId);
 
-        IPage<ProviderResp> result = providerMapper
-                .selectPage(PageHelper.toPage(page, pageSize), queryWrapper)
-                .convert(this::toResp);
+        IPage<Provider> providerPage = providerMapper.selectPage(PageHelper.toPage(page, pageSize), queryWrapper);
+        Map<Long, Integer> enabledModelCountMap = getEnabledModelCountMap(providerPage.getRecords());
+        Map<Long, ProviderHealthResp> providerHealthRespMap = getProviderHealthRespMap(providerPage.getRecords());
+
+        IPage<ProviderResp> result = providerPage.convert(provider -> toResp(
+                provider,
+                enabledModelCountMap.getOrDefault(provider.getId(), 0),
+                providerHealthRespMap.get(provider.getId())));
         return PageHelper.toPageResult(result);
     }
 
@@ -175,6 +181,43 @@ public class ProviderServiceImpl implements ProviderService {
     }
 
     /**
+     * 按当前页供应商批量统计已启用的模型数量。
+     *
+     * @param providers 当前页供应商列表
+     * @return key为供应商ID、value为已启用模型数的映射
+     */
+    private Map<Long, Integer> getEnabledModelCountMap(List<Provider> providers) {
+        if (providers == null || providers.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Long> providerIds = providers.stream()
+                .map(Provider::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+        if (providerIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        LambdaQueryWrapper<ModelConfig> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.select(ModelConfig::getProviderId);
+        queryWrapper.in(ModelConfig::getProviderId, providerIds);
+        queryWrapper.eq(ModelConfig::getEnabled, 1);
+
+        List<ModelConfig> enabledModelConfigs = modelConfigMapper.selectList(queryWrapper);
+        if (enabledModelConfigs == null || enabledModelConfigs.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        return enabledModelConfigs.stream()
+                .filter(modelConfig -> modelConfig.getProviderId() != null)
+                .collect(Collectors.groupingBy(
+                        ModelConfig::getProviderId,
+                        LinkedHashMap::new,
+                        Collectors.summingInt(item -> 1)));
+    }
+
+    /**
      * 查询并转换供应商健康状态信息。
      *
      * @param providerId 供应商ID
@@ -191,14 +234,51 @@ public class ProviderServiceImpl implements ProviderService {
     }
 
     /**
+     * 按当前页供应商批量查询健康状态信息。
+     *
+     * @param providers 当前页供应商列表
+     * @return key为供应商ID、value为健康状态响应的映射
+     */
+    private Map<Long, ProviderHealthResp> getProviderHealthRespMap(List<Provider> providers) {
+        if (providers == null || providers.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Long> providerIds = providers.stream()
+                .map(Provider::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+        if (providerIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        LambdaQueryWrapper<ProviderHealth> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.in(ProviderHealth::getProviderId, providerIds);
+        List<ProviderHealth> providerHealthList = providerHealthMapper.selectList(queryWrapper);
+        if (providerHealthList == null || providerHealthList.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        return providerHealthList.stream()
+                .filter(providerHealth -> providerHealth.getProviderId() != null)
+                .collect(Collectors.toMap(
+                        ProviderHealth::getProviderId,
+                        this::toProviderHealthResp,
+                        (left, right) -> right,
+                        LinkedHashMap::new));
+    }
+
+    /**
      * 将供应商实体转换为列表响应对象。
      *
      * @param provider 供应商实体
      * @return 供应商列表响应
      */
-    private ProviderResp toResp(Provider provider) {
+    private ProviderResp toResp(Provider provider, Integer enabledModelCount, ProviderHealthResp health) {
         ProviderResp resp = new ProviderResp();
         copyProviderToResp(resp, provider);
+        resp.setEnabledModelCount(enabledModelCount == null ? 0 : enabledModelCount);
+        resp.setHealth(health);
         return resp;
     }
 
@@ -211,6 +291,7 @@ public class ProviderServiceImpl implements ProviderService {
     private ProviderDetailResp toDetailResp(Provider provider) {
         ProviderDetailResp resp = new ProviderDetailResp();
         copyProviderToResp(resp, provider);
+        resp.setAuthConfig(provider.getAuthConfig());
         return resp;
     }
 

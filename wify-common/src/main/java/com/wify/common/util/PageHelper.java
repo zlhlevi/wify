@@ -25,8 +25,8 @@ public final class PageHelper {
 
     public static <T> PageResult<T> toPageResult(IPage<T> page) {
         if (page == null) {
-            return PageResult.ok(null, 0L, DEFAULT_PAGE, DEFAULT_PAGE_SIZE);
+            return PageResult.of(null, 0L, DEFAULT_PAGE, DEFAULT_PAGE_SIZE);
         }
-        return PageResult.ok(page.getRecords(), page.getTotal(), page.getCurrent(), page.getSize());
+        return PageResult.of(page.getRecords(), page.getTotal(), page.getCurrent(), page.getSize());
     }
 }

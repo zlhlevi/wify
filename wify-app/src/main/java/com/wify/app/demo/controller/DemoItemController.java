@@ -38,10 +38,10 @@ public class DemoItemController {
     }
 
     @GetMapping
-    public PageResult<DemoItemResp> list(
+    public Result<PageResult<DemoItemResp>> list(
             @RequestParam(value = "page", required = false) Integer page,
             @RequestParam(value = "pageSize", required = false) Integer pageSize) {
-        return demoItemService.list(page, pageSize);
+        return Result.ok(demoItemService.list(page, pageSize));
     }
 
     @PutMapping("/{id}")

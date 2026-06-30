@@ -3,30 +3,35 @@ package com.wify.common.dto;
 import java.util.Collections;
 import java.util.List;
 
-public class PageResult<T> extends Result<List<T>> {
+public class PageResult<T> {
+
+    private List<T> list;
 
     private long total;
     private long page;
     private long pageSize;
 
     public PageResult() {
-        setData(Collections.emptyList());
+        setList(Collections.emptyList());
     }
 
-    public PageResult(int code, String message, List<T> data, long total, long page, long pageSize) {
-        super(code, message, data == null ? Collections.emptyList() : data);
+    public PageResult(List<T> list, long total, long page, long pageSize) {
+        this.list = list == null ? Collections.emptyList() : list;
         this.total = total;
         this.page = page;
         this.pageSize = pageSize;
     }
 
-    public static <T> PageResult<T> ok(List<T> data, long total, long page, long pageSize) {
-        return new PageResult<>(200, "success", data, total, page, pageSize);
+    public static <T> PageResult<T> of(List<T> list, long total, long page, long pageSize) {
+        return new PageResult<>(list, total, page, pageSize);
     }
 
-    @Override
-    public void setData(List<T> data) {
-        super.setData(data == null ? Collections.emptyList() : data);
+    public List<T> getList() {
+        return list;
+    }
+
+    public void setList(List<T> list) {
+        this.list = list == null ? Collections.emptyList() : list;
     }
 
     public long getTotal() {

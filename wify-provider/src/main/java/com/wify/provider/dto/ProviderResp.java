@@ -24,6 +24,9 @@ public class ProviderResp {
     /** 是否已配置鉴权信息 */
     private Boolean authConfigured = Boolean.FALSE;
 
+    /** 供应商下已启用的模型数量 */
+    private Integer enabledModelCount = 0;
+
     /** 供应商健康状态 */
     private ProviderHealthResp health;
 

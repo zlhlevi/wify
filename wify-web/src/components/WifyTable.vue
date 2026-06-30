@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, useAttrs } from 'vue'
+import { onMounted, reactive, ref, useAttrs, useSlots } from 'vue'
 import type { PageQuery, PageResult } from '@/types/app'
 import type { WifyTableColumn, WifyTableSlotProps } from '@/components/types'
 
@@ -18,7 +18,13 @@ const props = withDefaults(defineProps<{
   pageSize: 20,
 })
 
+const emit = defineEmits<{
+  loaded: [result: PageResult<any>]
+}>()
+
 const attrs = useAttrs()
+const slots = useSlots()
+const tableRef = ref()
 const tableData = ref<any[]>([])
 const loading = ref(false)
 const pagination = reactive<PageQuery & { total: number }>({
@@ -40,6 +46,7 @@ const loadData = async () => {
     pagination.total = result.total || 0
     pagination.page = result.page || pagination.page
     pagination.pageSize = result.pageSize || pagination.pageSize
+    emit('loaded', result)
   } finally {
     loading.value = false
   }
@@ -47,6 +54,10 @@ const loadData = async () => {
 
 const refresh = async () => {
   await loadData()
+}
+
+const toggleRowExpansion = (row: any, expanded?: boolean) => {
+  tableRef.value?.toggleRowExpansion(row, expanded)
 }
 
 const handleCurrentChange = async (page: number) => {
@@ -62,6 +73,7 @@ const handleSizeChange = async (pageSize: number) => {
 
 defineExpose({
   refresh,
+  toggleRowExpansion,
 })
 
 onMounted(async () => {
@@ -72,11 +84,18 @@ onMounted(async () => {
 <template>
   <div class="wify-table">
     <el-table
+      ref="tableRef"
       v-bind="attrs"
       v-loading="loading"
       :data="tableData"
       class="wify-table__inner"
     >
+      <el-table-column v-if="slots.expand" type="expand" width="56">
+        <template #default="scope">
+          <slot name="expand" v-bind="scope as WifyTableSlotProps" />
+        </template>
+      </el-table-column>
+
       <el-table-column
         v-for="column in columns"
         :key="`${String(column.prop || column.label)}-${column.slot || 'default'}`"

@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="FormData extends Record<string, unknown>">
-import { computed, getCurrentInstance, nextTick, ref } from 'vue'
+import { computed, getCurrentInstance, nextTick, ref, toRaw } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import type { WifyFormDialogSubmitPayload } from '@/components/types'
 
@@ -42,12 +42,49 @@ const formLabelWidth = computed(() => {
   return typeof props.labelWidth === 'number' ? `${props.labelWidth}px` : props.labelWidth
 })
 
-function cloneValue<ValueType>(value: ValueType): ValueType {
-  if (typeof structuredClone === 'function') {
-    return structuredClone(value)
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Object.prototype.toString.call(value) === '[object Object]'
+}
+
+function cloneSerializable(value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return value
   }
 
-  return JSON.parse(JSON.stringify(value)) as ValueType
+  if (typeof value !== 'object') {
+    return value
+  }
+
+  const rawValue = toRaw(value)
+
+  if (rawValue instanceof Date) {
+    return new Date(rawValue.getTime())
+  }
+
+  if (Array.isArray(rawValue)) {
+    return rawValue
+      .map((item) => cloneSerializable(item))
+      .filter((item) => item !== undefined)
+  }
+
+  if (!isPlainObject(rawValue)) {
+    return undefined
+  }
+
+  const result: Record<string, unknown> = {}
+
+  Object.entries(rawValue).forEach(([key, item]) => {
+    const clonedItem = cloneSerializable(item)
+    if (clonedItem !== undefined) {
+      result[key] = clonedItem
+    }
+  })
+
+  return result
+}
+
+function cloneValue<ValueType>(value: ValueType): ValueType {
+  return cloneSerializable(value) as ValueType
 }
 
 function close() {

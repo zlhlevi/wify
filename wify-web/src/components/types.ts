@@ -16,6 +16,11 @@ export interface WifyTableSlotProps<RowData = any> {
   $index: number
 }
 
+export interface WifyTableInstance<RowData = any> {
+  refresh: () => Promise<void>
+  toggleRowExpansion: (row: RowData, expanded?: boolean) => void
+}
+
 export interface WifyFormDialogSubmitPayload<FormData = any> {
   model: FormData
   isEditMode: boolean
